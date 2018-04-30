@@ -8,11 +8,14 @@ from matplotlib import pyplot as plt
 train = []
 labels = []
 labels_1 = []
+norm_vals = [0, 0, 0, 0, 0, 0]
 with open('train.csv', 'r') as file_object:
     line = file_object.readline()
     count = 0
-    while count < 1000000:
+    # skip header
+    if line.split(",")[0][0].isalpha():
         line = file_object.readline()
+    while line:
         row = line.split(",")
         time_delta = 0
         if row[6]:
@@ -22,20 +25,26 @@ with open('train.csv', 'r') as file_object:
             time_delta = int(time_delta.total_seconds())
 
         train.append(list(map(int, row[:5])) + [time_delta])
+        for i, j in enumerate(train[-1]):
+            if norm_vals[i] < j:
+                norm_vals[i] = j
         label = int(row[7])
         labels.append(label)
         if label:
             labels_1.append(count)
 
+        line = file_object.readline()
         count += 1
 
+
+norm_vals = np.array(norm_vals)
 train = np.array(train)
 labels = np.array(labels)
 labels_1 = np.array(labels_1)
 
 # since the fraudulent labels are a very small proportion of the data, we will resample with more
 # positive labels to learn to distinguish these features better
-len(labels_1) / count
+print(len(labels_1) / count)
 
 
 # construct batch generator which prefers to include fraudulent labels
@@ -47,24 +56,24 @@ def get_batches(train_list, batch_size):
     # only full batches
     X = train_list[:n_batches * batch_size]
 
-    for idx in range(0, count, batch_size):
+    for idx in range(0, len(X), batch_size):
         batch = X[idx:idx + batch_size]
         x = []
         for ii in range(len(batch)):
             if np.random.rand() >= 0.8:
                 batch_x = train_list[labels_1[np.random.randint(len(labels_1))]]
-                x.append((batch_x + 0.0001) / sum(batch_x))
+                x.append((batch_x / norm_vals) + 0.0001)
             else:
                 batch_x = batch[ii]
-                x.append((batch_x + 0.0001) / sum(batch_x))
+                x.append((batch_x / norm_vals) + 0.0001)
 
         yield x, x
 
 
 train_graph = tf.Graph()
 # Size of the encoding layer (the hidden layer)
-encoding_dim = 52  # feel free to change this value
-learning_rate = 0.0001
+encoding_dim = 100
+learning_rate = 0.00001
 with train_graph.as_default():
     # Input and target placeholders
     inp_shape = train[0].shape[0]
@@ -93,7 +102,7 @@ with train_graph.as_default():
 
 # !mkdir checkpoints
 
-epochs = 20
+epochs = 10
 batch_size = 1000
 
 with train_graph.as_default():
@@ -135,7 +144,7 @@ with train_graph.as_default():
 with tf.Session(graph=train_graph) as sess:
     saver.restore(sess, tf.train.latest_checkpoint('checkpoints'))
     samples_1 = np.take(train, labels_1, axis=0)
-    samples_1 = np.array([(i + 0.0001) / sum(i) for i in samples_1])
+    samples_1 = np.array([(i / norm_vals) + 0.0001 for i in samples_1])
     embed_mat_1 = sess.run(encoded, feed_dict={inputs_: samples_1, is_train: False})
 
     generalization = np.sum(embed_mat_1, axis=0)
@@ -143,19 +152,21 @@ with tf.Session(graph=train_graph) as sess:
     generalization = generalization / np.sum(generalization)
 
     train_0 = []
-    for i in range(2000):
+    for i in range(200000):
         idx = np.random.randint(0, count)
         if labels[idx] != 0:
             train_0.append(idx)
 
     samples_0 = np.take(train, train_0, axis=0)
-    samples_0 = np.array([(i + 0.0001) / sum(i) for i in samples_0])
+    samples_0 = np.array([(i / norm_vals) + 0.0001 for i in samples_0])
     embed_mat_0 = sess.run(encoded, feed_dict={inputs_: samples_0, is_train: False})
     generalization_0 = np.sum(embed_mat_0, axis=0)
 
     generalization_0 = generalization_0 / np.sum(generalization_0)
 
 
-plt.plot(generalization)
-plt.plot(generalization_0)
-plt.show()
+#plt.plot(generalization)
+#plt.plot(generalization_0)
+#plt.show()
+
+# find max difference dimensions
